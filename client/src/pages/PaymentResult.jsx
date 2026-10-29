@@ -8,6 +8,7 @@ import { useCart } from '../context/CartContext';
 import { api } from '../lib/api';
 import { formatCOP } from '../lib/format';
 
+/** [título, texto] que se muestra según el estado de la orden. */
 const MESSAGES = {
   APPROVED: ['¡Gracias por tu compra!', 'Tu pago fue aprobado. Te contactaremos para coordinar el envío.'],
   PENDING: ['Pago en proceso', 'Estamos esperando la confirmación de tu banco. Esta página se actualizará sola.'],
@@ -27,6 +28,7 @@ export default function PaymentResult() {
     if (!transactionId) return undefined;
     let attempts = 0;
     let timer;
+    // Consulta el estado; mientras siga PENDING reintenta cada 4 s (máx. 15 veces ≈ 1 min).
     const check = async () => {
       try {
         const data = await api.get(`/checkout/transaction/${encodeURIComponent(transactionId)}`);

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { api } from '../lib/api';
 import './admin.css';
 
+/** Formulario de ingreso al panel. La sesión queda en una cookie httpOnly que pone el servidor. */
 export default function AdminLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -10,6 +11,7 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  /** Envía las credenciales y, si son válidas, entra al listado de productos. */
   const onSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);

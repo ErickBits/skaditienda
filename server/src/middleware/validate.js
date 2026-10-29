@@ -5,6 +5,9 @@ import { HttpError } from '../utils/http.js';
  * Las rutas solo deben leer de `req.valid`, nunca directamente de `req.body`.
  *
  *   router.post('/', validate({ body: schema }), handler)
+ *
+ * @param {{ params?: import('zod').ZodType, query?: import('zod').ZodType, body?: import('zod').ZodType }} schemas
+ * @returns {import('express').RequestHandler} Responde 400 con `details` por campo si algo no valida.
  */
 export const validate = (schemas) => (req, _res, next) => {
   req.valid = {};

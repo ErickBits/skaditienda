@@ -6,8 +6,10 @@ import { validate } from '../../middleware/validate.js';
 import { HttpError } from '../../utils/http.js';
 
 const router = Router();
+// Debe coincidir con MAX en client/src/admin/AdminBanner.jsx.
 const MAX_FEATURED = 10;
 
+/** GET / — Productos destacados en el orden del banner (incluye ocultos, para que el admin los vea). */
 router.get('/', async (_req, res) => {
   const { rows } = await query(
     `SELECT p.id, p.name, p.is_active,
@@ -19,7 +21,10 @@ router.get('/', async (_req, res) => {
   res.json(rows);
 });
 
-/** Reemplaza la lista completa; el orden del arreglo es el orden del banner. */
+/**
+ * PUT / — Reemplaza la lista completa; el orden del arreglo es el orden del banner.
+ * Todo ocurre en una transacción: o se aplica la lista entera o no cambia nada.
+ */
 router.put(
   '/',
   validate({

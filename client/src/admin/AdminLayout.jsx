@@ -15,6 +15,7 @@ export default function AdminLayout() {
     api.get('/admin/auth/me').then(setAdmin).catch(() => navigate('/admin/login', { replace: true }));
   }, [navigate]);
 
+  /** Cierra la sesión en el servidor (borra la cookie) y vuelve al login. */
   const logout = async () => {
     await api.post('/admin/auth/logout').catch(() => {});
     navigate('/admin/login', { replace: true });

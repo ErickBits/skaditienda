@@ -1,12 +1,18 @@
+/** Respuestas de error de la API: 404 de rutas inexistentes y manejador central. */
 import multer from 'multer';
 import { env } from '../config/env.js';
 import { HttpError } from '../utils/http.js';
 
+/** 404 en JSON para rutas /api que no existen (así no caen en el index.html de la SPA). */
 export function apiNotFound(_req, res) {
   res.status(404).json({ error: 'Ruta no encontrada' });
 }
 
-/** Manejador central: toda respuesta de error sale de aquí con el mismo formato. */
+/**
+ * Manejador central: toda respuesta de error sale de aquí con el formato `{ error, details? }`.
+ * Traduce errores conocidos (multer, body-parser, PostgreSQL) a HttpError con un mensaje
+ * entendible. En producción oculta el mensaje real de los 5xx y lo deja solo en el log.
+ */
 // eslint-disable-next-line no-unused-vars
 export function errorHandler(err, _req, res, _next) {
   let error = err;
@@ -18,9 +24,9 @@ export function errorHandler(err, _req, res, _next) {
     error = new HttpError(400, 'JSON inválido');
   } else if (err.type === 'entity.too.large') {
     error = new HttpError(413, 'La solicitud es demasiado grande');
-  } else if (err.code === '23505') {
+  } else if (err.code === '23505') { // PostgreSQL: violación de UNIQUE
     error = new HttpError(409, 'Ya existe un registro con esos datos');
-  } else if (err.code === '23503') {
+  } else if (err.code === '23503') { // PostgreSQL: violación de llave foránea
     error = new HttpError(409, 'El registro está relacionado con otros datos');
   }
 

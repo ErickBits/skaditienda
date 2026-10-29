@@ -4,9 +4,11 @@ import { env } from './config/env.js';
 import { pool } from './config/db.js';
 import { createApp } from './app.js';
 
+// La carpeta de imágenes debe existir antes de recibir la primera subida.
 await fs.mkdir(env.UPLOAD_PATH, { recursive: true });
 
 try {
+  // Falla rápido si la base de datos no responde, en vez de arrancar "a medias".
   await pool.query('SELECT 1');
 } catch (err) {
   console.error('❌ No se pudo conectar a PostgreSQL:', err.message);

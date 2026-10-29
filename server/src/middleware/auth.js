@@ -11,10 +11,12 @@ import { env } from '../config/env.js';
 import { query } from '../config/db.js';
 import { HttpError } from '../utils/http.js';
 
+/** Nombre de la cookie que guarda el JWT de sesión. */
 export const ADMIN_COOKIE = 'skadi_admin';
 const SESSION_HOURS = 8;
 const JWT_OPTIONS = { algorithm: 'HS256', issuer: 'skaditienda', audience: 'admin' };
 
+/** Opciones de la cookie de sesión; el logout reutiliza las mismas (sin maxAge) para borrarla. */
 export const adminCookieOptions = {
   httpOnly: true,
   secure: env.isProd,
@@ -23,6 +25,11 @@ export const adminCookieOptions = {
   maxAge: SESSION_HOURS * 60 * 60 * 1000,
 };
 
+/**
+ * Firma el JWT de sesión de un administrador.
+ * @param {{ id: number, email: string }} admin
+ * @returns {string} Token con `sub` = id del admin, válido por SESSION_HOURS horas.
+ */
 export function signAdminToken(admin) {
   return jwt.sign({ sub: String(admin.id), email: admin.email }, env.JWT_SECRET, {
     ...JWT_OPTIONS,
@@ -30,7 +37,10 @@ export function signAdminToken(admin) {
   });
 }
 
-/** Exige una sesión de administrador válida y vigente. */
+/**
+ * Middleware: exige una sesión de administrador válida y vigente.
+ * Si es válida deja `{ id, email }` en `req.admin`; si no, responde 401.
+ */
 export async function requireAdmin(req, _res, next) {
   const token = req.cookies?.[ADMIN_COOKIE];
   if (!token) return next(new HttpError(401, 'No autenticado'));

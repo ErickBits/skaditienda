@@ -8,6 +8,7 @@ import FilterPanel from '../components/FilterPanel';
 import ProductCard from '../components/ProductCard';
 import { api, toQuery } from '../lib/api';
 
+/** Lista separada por comas de la URL: "40,41" → ["40", "41"]. */
 const list = (v) => (v ? v.split(',').filter(Boolean) : []);
 
 export default function Catalog() {
@@ -18,6 +19,7 @@ export default function Catalog() {
   const [categoryName, setCategoryName] = useState('');
   const [error, setError] = useState('');
 
+  // Filtros actuales leídos de la URL (la URL es la fuente de verdad).
   const filters = useMemo(
     () => ({
       q: params.get('q') ?? '',
@@ -30,12 +32,17 @@ export default function Catalog() {
     [params],
   );
 
+  /**
+   * Aplica cambios a los filtros escribiéndolos en la URL. Cualquier cambio que no sea
+   * de página vuelve a la 1; los valores por defecto se omiten para que la URL quede limpia.
+   */
   const updateFilters = (patch) => {
     const next = { ...filters, ...patch, page: patch.page ?? 1 };
     setParams(new URLSearchParams(toQuery({ ...next, discount: next.discount || undefined, sort: next.sort === 'recent' ? undefined : next.sort, page: next.page > 1 ? next.page : undefined }).slice(1)));
   };
 
   useEffect(() => {
+    // Opciones de filtro y nombre de la categoría: solo cambian con la categoría.
     api.get(`/filters${toQuery({ category: slug })}`).then(setAvailable).catch(() => {});
     if (slug) {
       api.get('/categories').then((cats) => setCategoryName(cats.find((c) => c.slug === slug)?.name ?? '')).catch(() => {});
@@ -43,6 +50,7 @@ export default function Catalog() {
   }, [slug]);
 
   useEffect(() => {
+    // Productos: se recargan con cada cambio de categoría o de filtros.
     setError('');
     api
       .get(`/products${toQuery({ category: slug, ...filters, discount: filters.discount ? 'true' : undefined })}`)

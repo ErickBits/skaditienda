@@ -1,3 +1,4 @@
+/** Sesión del panel: login, logout y consulta de la sesión actual. */
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
@@ -28,6 +29,10 @@ const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+/**
+ * POST /login — Verifica credenciales y deja la cookie de sesión.
+ * Responde el mismo 401 si falla el correo o la contraseña (no revela cuál).
+ */
 router.post('/login', loginLimiter, validate({ body: loginSchema }), async (req, res) => {
   const { email, password } = req.valid.body;
   const { rows: [admin] } = await query('SELECT id, email, password_hash FROM admins WHERE email = $1', [email]);
@@ -40,12 +45,14 @@ router.post('/login', loginLimiter, validate({ body: loginSchema }), async (req,
   res.json({ email: admin.email });
 });
 
+/** POST /logout — Borra la cookie (clearCookie exige las mismas opciones con que se creó, sin maxAge). */
 router.post('/logout', (_req, res) => {
   const { maxAge: _maxAge, ...options } = adminCookieOptions;
   res.clearCookie(ADMIN_COOKIE, options);
   res.status(204).end();
 });
 
+/** GET /me — Admin de la sesión actual; el panel lo usa para saber si sigue autenticado. */
 router.get('/me', requireAdmin, (req, res) => res.json({ email: req.admin.email }));
 
 export default router;

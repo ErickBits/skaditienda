@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { api, toQuery } from '../lib/api';
 import { formatCOP, formatDate } from '../lib/format';
 
+/** Etiqueta en español de cada estado de orden (ALL solo se usa en el filtro). */
 const STATUS_LABELS = { APPROVED: 'Pagada', PENDING: 'Pendiente', DECLINED: 'Rechazada', VOIDED: 'Anulada', ERROR: 'Error', ALL: 'Todas' };
 
 export default function AdminOrders() {
@@ -11,17 +12,21 @@ export default function AdminOrders() {
   const [expanded, setExpanded] = useState({}); // id → detalle
   const [error, setError] = useState('');
 
+  /** Pide la página actual de órdenes con los filtros vigentes. */
   const load = useCallback(() => {
     api.get(`/admin/orders${toQuery(filters)}`).then(setData).catch((e) => setError(e.message));
   }, [filters]);
 
   useEffect(() => {
+    // Debounce de 250 ms: evita una petición por cada tecla del buscador.
     const t = setTimeout(load, 250);
     return () => clearTimeout(t);
   }, [load]);
 
+  /** Cambia un filtro y vuelve a la página 1. */
   const setFilter = (key, value) => setFilters((f) => ({ ...f, [key]: value, page: 1 }));
 
+  /** Muestra u oculta el detalle (envío e ítems) de una orden; lo pide al servidor al abrirlo. */
   const toggleDetail = async (id) => {
     if (expanded[id]) return setExpanded(({ [id]: _, ...rest }) => rest);
     try {
@@ -32,6 +37,7 @@ export default function AdminOrders() {
     }
   };
 
+  /** Marca o desmarca la orden como despachada y actualiza su fila sin recargar la tabla. */
   const toggleDispatch = async (order) => {
     try {
       const updated = await api.patch(`/admin/orders/${order.id}/dispatch`, { dispatched: !order.dispatched });

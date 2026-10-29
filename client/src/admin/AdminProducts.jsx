@@ -3,12 +3,14 @@ import { Link } from 'react-router';
 import { api, toQuery } from '../lib/api';
 import { formatCOP } from '../lib/format';
 
+/** Listado de productos del panel: búsqueda, descuento rápido, edición y eliminación. */
 export default function AdminProducts() {
   const [data, setData] = useState(null);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
 
+  /** Pide la página actual del listado con el texto de búsqueda. */
   const load = useCallback(() => {
     api.get(`/admin/products${toQuery({ q, page })}`).then(setData).catch((e) => setError(e.message));
   }, [q, page]);
@@ -18,6 +20,7 @@ export default function AdminProducts() {
     return () => clearTimeout(t);
   }, [load]);
 
+  /** Activa o desactiva el descuento desde la tabla y actualiza solo esa fila. */
   const toggleDiscount = async (p) => {
     try {
       const updated = await api.patch(`/admin/products/${p.id}/discount`, {
@@ -31,6 +34,7 @@ export default function AdminProducts() {
     }
   };
 
+  /** Elimina el producto (previa confirmación) y recarga el listado. */
   const remove = async (p) => {
     if (!window.confirm(`¿Eliminar "${p.name}"? Esta acción no se puede deshacer.`)) return;
     try {

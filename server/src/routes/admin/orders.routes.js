@@ -18,10 +18,15 @@ const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
+/**
+ * GET / — Listado paginado con filtros de estado, despacho, rango de fechas
+ * y búsqueda por referencia, nombre o correo.
+ */
 router.get('/', validate({ query: listQuery }), async (req, res) => {
   const f = req.valid.query;
   const where = [];
   const params = [];
+  // Agrega un valor a `params` y devuelve su marcador ($1, $2…): el SQL nunca lleva valores del usuario.
   const param = (value) => `$${params.push(value)}`;
 
   if (f.status !== 'ALL') where.push(`o.status = ${param(f.status)}`);
@@ -34,6 +39,8 @@ router.get('/', validate({ query: listQuery }), async (req, res) => {
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  // `count(*) OVER()` trae el total sin paginar en la misma consulta.
+  // LIMIT/OFFSET se interpolan porque Zod ya garantizó que son enteros.
   const { rows } = await query(
     `SELECT o.id, o.reference, o.customer_name, o.customer_email, o.city, o.amount_in_cents, o.status,
             o.dispatched, o.dispatched_at, o.paid_at, o.created_at,
@@ -52,6 +59,7 @@ router.get('/', validate({ query: listQuery }), async (req, res) => {
 
 const idParams = z.object({ id: z.uuid() });
 
+/** GET /:id — Detalle de una orden con sus ítems (foto del producto al momento de la compra). */
 router.get('/:id', validate({ params: idParams }), async (req, res) => {
   const { rows: [order] } = await query('SELECT * FROM orders WHERE id = $1', [req.valid.params.id]);
   if (!order) throw new HttpError(404, 'Orden no encontrada');
@@ -62,6 +70,7 @@ router.get('/:id', validate({ params: idParams }), async (req, res) => {
   res.json({ ...order, items });
 });
 
+/** PATCH /:id/dispatch — Marca o desmarca una orden como despachada. Solo aplica a órdenes APPROVED. */
 router.patch(
   '/:id/dispatch',
   validate({ params: idParams, body: z.object({ dispatched: z.boolean() }) }),

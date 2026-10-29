@@ -16,18 +16,21 @@ import './FeaturedBanner.css';
 const ease = [0.22, 1, 0.36, 1];
 const AUTOPLAY_MS = 6500;
 
+/** Variantes de animación del texto; `delay` escalona cada línea. */
 const text = (delay) => ({
   enter: { opacity: 0, y: 22 },
   center: { opacity: 1, y: 0, transition: { duration: 0.8, ease, delay } },
   exit: { opacity: 0, y: -12, transition: { duration: 0.3 } },
 });
 
+/** Variantes de animación de la foto del slide. */
 const media = {
   enter: { opacity: 0, scale: 1.08, x: 40 },
   center: { opacity: 1, scale: 1, x: 0, transition: { duration: 1.1, ease } },
   exit: { opacity: 0, x: -30, transition: { duration: 0.4 } },
 };
 
+/** @param {{ products: object[] }} props Productos destacados (de /api/products/featured). */
 export default function FeaturedBanner({ products }) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -35,6 +38,7 @@ export default function FeaturedBanner({ products }) {
   const count = products.length;
 
   useEffect(() => {
+    // Programa el siguiente slide; se reinicia cuando cambia `index` (también al hacer clic en un punto).
     if (count < 2 || paused || reduceMotion) return undefined;
     const timer = setTimeout(() => setIndex((i) => (i + 1) % count), AUTOPLAY_MS);
     return () => clearTimeout(timer);

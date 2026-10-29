@@ -9,7 +9,11 @@ import { HttpError, escapeLike } from '../../utils/http.js';
 
 const router = Router();
 
-/** Columnas comunes para tarjetas de producto (incluye imágenes ordenadas). */
+/**
+ * SELECT común para tarjetas de producto (incluye imágenes ordenadas).
+ * @param {string} [extraColumns] Columnas adicionales, terminadas en coma (p. ej. "p.description,").
+ * @returns {string} SQL sin WHERE: quien lo usa agrega filtros y orden.
+ */
 const cardSelect = (extraColumns = '') => `
   SELECT ${extraColumns} p.id, p.name, p.slug, p.price, p.final_price, p.discount_active, p.discount_percent,
          c.name AS category_name, c.slug AS category_slug,
@@ -18,6 +22,7 @@ const cardSelect = (extraColumns = '') => `
     FROM products p
     JOIN categories c ON c.id = p.category_id`;
 
+// Valor de ?sort= → ORDER BY. Solo se interpolan estos textos fijos, nunca lo que envía el usuario.
 const SORTS = {
   recent: 'p.created_at DESC, p.id DESC',
   price_asc: 'p.final_price ASC, p.id',
@@ -25,7 +30,7 @@ const SORTS = {
   name: 'p.name ASC',
 };
 
-/** "40,41" → ["40","41"] */
+/** Lista separada por comas de la URL, sin vacíos ni duplicados (máx. 20): "40,41" → ["40","41"] */
 const csvList = z
   .string()
   .max(300)
@@ -47,6 +52,12 @@ const listQuery = z.object({
 
 // Orden natural de tallas de ropa; las numéricas (calzado, pantalón) van por valor.
 const SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+/**
+ * Comparador para ordenar tallas: numéricas por valor, de ropa según SIZE_ORDER y el resto alfabético.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
 function compareSizes(a, b) {
   const [na, nb] = [Number(a), Number(b)];
   if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
@@ -55,15 +66,21 @@ function compareSizes(a, b) {
   return a.localeCompare(b, 'es');
 }
 
+/** GET /categories — Categorías del menú, en el orden definido por sort_order. */
 router.get('/categories', async (_req, res) => {
   const { rows } = await query('SELECT id, name, slug FROM categories ORDER BY sort_order, name');
   res.json(rows);
 });
 
+/**
+ * GET /products — Listado público paginado (solo productos activos) con filtros de
+ * categoría, búsqueda, talla, color, descuento y rango de precio, y orden configurable.
+ */
 router.get('/products', validate({ query: listQuery }), async (req, res) => {
   const f = req.valid.query;
   const where = ['p.is_active'];
   const params = [];
+  // Agrega un valor a `params` y devuelve su marcador ($1, $2…).
   const param = (value) => `$${params.push(value)}`;
 
   if (f.category) where.push(`c.slug = ${param(f.category)}`);
@@ -84,6 +101,8 @@ router.get('/products', validate({ query: listQuery }), async (req, res) => {
   const whereSql = where.join(' AND ');
   const offset = (f.page - 1) * f.limit;
 
+  // Página y total en paralelo; comparten el mismo WHERE y parámetros.
+  // ORDER BY/LIMIT/OFFSET se interpolan: vienen de SORTS o de enteros ya validados.
   const [{ rows: items }, { rows: [{ total }] }] = await Promise.all([
     query(`${cardSelect()} WHERE ${whereSql} ORDER BY ${SORTS[f.sort]} LIMIT ${f.limit} OFFSET ${offset}`, params),
     query(`SELECT count(*)::int AS total FROM products p JOIN categories c ON c.id = p.category_id WHERE ${whereSql}`, params),
@@ -92,7 +111,7 @@ router.get('/products', validate({ query: listQuery }), async (req, res) => {
   res.json({ items, total, page: f.page, pages: Math.max(1, Math.ceil(total / f.limit)) });
 });
 
-/** Tallas y colores disponibles (con stock) para construir los filtros. */
+/** GET /filters — Tallas y colores disponibles (con stock) para construir los filtros, opcionalmente por categoría. */
 router.get('/filters', validate({ query: z.object({ category: z.string().max(60).optional() }) }), async (req, res) => {
   const { category } = req.valid.query;
   const { rows } = await query(
@@ -109,6 +128,10 @@ router.get('/filters', validate({ query: z.object({ category: z.string().max(60)
   });
 });
 
+/**
+ * GET /products/featured — Hasta 10 productos activos del banner, en su orden.
+ * Debe declararse antes de /products/:slug para que "featured" no se tome como slug.
+ */
 router.get('/products/featured', async (_req, res) => {
   const { rows } = await query(
     `${cardSelect('p.description,')}
@@ -119,6 +142,7 @@ router.get('/products/featured', async (_req, res) => {
   res.json(rows);
 });
 
+/** GET /products/:slug — Detalle de un producto activo con sus variantes ordenadas por color y talla. */
 router.get('/products/:slug', validate({ params: z.object({ slug: z.string().max(120) }) }), async (req, res) => {
   const { rows: [product] } = await query(
     `${cardSelect('p.description,')}

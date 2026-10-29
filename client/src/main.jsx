@@ -1,3 +1,4 @@
+/** Punto de entrada del cliente: monta React con el router, la configuración de animaciones y el carrito. */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';

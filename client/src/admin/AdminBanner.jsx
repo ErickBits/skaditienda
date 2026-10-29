@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Reorder } from 'framer-motion';
 import { api, toQuery } from '../lib/api';
 
+// Debe coincidir con MAX_FEATURED del servidor.
 const MAX = 10;
 
 export default function AdminBanner() {
@@ -13,21 +14,25 @@ export default function AdminBanner() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    // Carga la lista actual del banner.
     api.get('/admin/banner').then(setFeatured).catch((e) => setMessage({ type: 'error', text: e.message }));
   }, []);
 
   useEffect(() => {
+    // Buscador con debounce de 250 ms para no pedir en cada tecla.
     const t = setTimeout(() => {
       api.get(`/admin/products${toQuery({ q, limit: 20 })}`).then((r) => setResults(r.items)).catch(() => {});
     }, 250);
     return () => clearTimeout(t);
   }, [q]);
 
+  /** Agrega un producto al final del banner (sin duplicados ni pasar de MAX). Se guarda al pulsar "Guardar". */
   const add = (p) => {
     if (featured.length >= MAX || featured.some((f) => f.id === p.id)) return;
     setFeatured([...featured, { id: p.id, name: p.name, thumbnail: p.thumbnail, is_active: p.is_active }]);
   };
 
+  /** Guarda la lista completa; el orden del arreglo es el orden del banner. */
   const save = async () => {
     setSaving(true);
     try {

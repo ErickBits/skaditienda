@@ -39,7 +39,12 @@ const productSchema = z.object({
   removeImageIds: z.array(z.number().int().positive()).max(50).default([]),
 });
 
-/** Lee y valida el campo "data" del multipart. */
+/**
+ * Lee y valida el campo "data" del multipart (no se puede usar `validate` porque llega como texto).
+ * @param {import('express').Request} req
+ * @returns {z.infer<typeof productSchema>} Datos limpios del producto.
+ * @throws {HttpError} 400 si no es JSON o no cumple el esquema.
+ */
 function parseProductData(req) {
   let raw;
   try {
@@ -54,7 +59,11 @@ function parseProductData(req) {
   return result.data;
 }
 
-/** Si algo falla después de subir archivos, se borran para no dejar huérfanos. */
+/**
+ * Envuelve un handler que recibe archivos: si algo falla después de subirlos,
+ * se borran del disco para no dejar huérfanos, y el error sigue su curso.
+ * @param {(req: import('express').Request, res: import('express').Response) => Promise<void>} handler
+ */
 const withUploadCleanup = (handler) => async (req, res) => {
   try {
     await handler(req, res);
@@ -64,6 +73,12 @@ const withUploadCleanup = (handler) => async (req, res) => {
   }
 };
 
+/**
+ * Agrega imágenes nuevas al final de la galería (después del sort_order más alto).
+ * @param {import('pg').PoolClient} db Cliente de la transacción.
+ * @param {number} productId
+ * @param {Express.Multer.File[]} files Archivos ya guardados por multer.
+ */
 async function insertImages(db, productId, files) {
   if (!files.length) return;
   const { rows: [{ max }] } = await db.query('SELECT COALESCE(max(sort_order), -1) AS max FROM product_images WHERE product_id = $1', [productId]);
@@ -74,7 +89,13 @@ async function insertImages(db, productId, files) {
   );
 }
 
-/** Sincroniza variantes: actualiza/crea las enviadas y elimina las que ya no están. */
+/**
+ * Sincroniza variantes: actualiza/crea las enviadas y elimina las que ya no están.
+ * Una variante se identifica por (talla, color); el stock se sobrescribe.
+ * @param {import('pg').PoolClient} db Cliente de la transacción.
+ * @param {number} productId
+ * @param {Array<{ size: string, color: string, stock: number }>} variants Lista completa deseada.
+ */
 async function syncVariants(db, productId, variants) {
   await db.query(
     `DELETE FROM product_variants
@@ -91,6 +112,12 @@ async function syncVariants(db, productId, variants) {
   );
 }
 
+/**
+ * Producto completo (con imágenes y variantes) tal como lo usa el formulario del admin.
+ * @param {number} id
+ * @returns {Promise<object>}
+ * @throws {HttpError} 404 si no existe.
+ */
 async function getProduct(id) {
   const { rows: [product] } = await query(
     `SELECT p.*,
@@ -107,6 +134,7 @@ async function getProduct(id) {
 
 // ── Listado ───────────────────────────────────────────────────
 
+/** GET / — Listado paginado (incluye ocultos) con miniatura, stock total y búsqueda por nombre. */
 router.get(
   '/',
   validate({
@@ -137,12 +165,14 @@ router.get(
   },
 );
 
+/** GET /:id — Producto completo para editarlo. */
 router.get('/:id', validate({ params: idParams }), async (req, res) => {
   res.json(await getProduct(req.valid.params.id));
 });
 
 // ── Crear ─────────────────────────────────────────────────────
 
+/** POST / — Crea el producto con variantes e imágenes. El slug lleva un sufijo aleatorio para ser único. */
 router.post(
   '/',
   uploadImages,
@@ -168,6 +198,7 @@ router.post(
 
 // ── Editar ────────────────────────────────────────────────────
 
+/** PUT /:id — Actualiza datos, sincroniza variantes, borra las imágenes marcadas y agrega las nuevas. */
 router.put(
   '/:id',
   validate({ params: idParams }),
@@ -204,6 +235,7 @@ router.put(
 
 // ── Descuento rápido (toggle desde el listado) ────────────────
 
+/** PATCH /:id/discount — Activa/desactiva el descuento; si no llega porcentaje se conserva el actual. */
 router.patch(
   '/:id/discount',
   validate({
@@ -226,6 +258,7 @@ router.patch(
 
 // ── Eliminar ──────────────────────────────────────────────────
 
+/** DELETE /:id — Elimina el producto y, después del COMMIT, sus imágenes del disco. */
 router.delete('/:id', validate({ params: idParams }), async (req, res) => {
   const urls = await withTransaction(async (db) => {
     const { rows: images } = await db.query('SELECT url FROM product_images WHERE product_id = $1', [req.valid.params.id]);

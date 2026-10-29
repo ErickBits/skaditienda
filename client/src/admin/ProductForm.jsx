@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { api, fieldErrors } from '../lib/api';
 import { formatCOP } from '../lib/format';
 
+/** Estado inicial del formulario para un producto nuevo. */
 const EMPTY = {
   name: '', description: '', price: '', categoryId: '', discountActive: false, discountPercent: 0, isActive: true,
   variants: [{ size: '', color: '', stock: 0 }], images: [],
@@ -24,6 +25,7 @@ export default function ProductForm() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    // Carga las categorías y, si es edición, el producto a editar.
     api.get('/categories').then(setCategories).catch(() => {});
     if (isNew) return;
     api
@@ -46,13 +48,20 @@ export default function ProductForm() {
     return () => urls.forEach(URL.revokeObjectURL);
   }, [files]);
 
+  /** Cambia un campo del formulario. */
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  /** Cambia un campo de la variante en la posición `i`. */
   const setVariant = (i, key, value) => set('variants', form.variants.map((v, idx) => (idx === i ? { ...v, [key]: value } : v)));
 
+  // Solo vista previa: el precio real lo calcula la BD (columna final_price).
   const finalPrice = form.discountActive && form.discountPercent > 0
     ? Math.round((Number(form.price) * (100 - form.discountPercent)) / 100)
     : Number(form.price);
 
+  /**
+   * Arma el multipart ("data" en JSON + "images") y crea o actualiza el producto.
+   * Las filas de variantes sin talla ni color se descartan.
+   */
   const onSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -84,6 +93,7 @@ export default function ProductForm() {
     }
   };
 
+  // Imágenes actuales menos las marcadas para borrar (se eliminan al guardar).
   const visibleImages = form.images.filter((img) => !removeImageIds.includes(img.id));
 
   return (

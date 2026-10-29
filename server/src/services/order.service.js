@@ -5,12 +5,20 @@ import crypto from 'node:crypto';
 import { withTransaction } from '../config/db.js';
 import { HttpError } from '../utils/http.js';
 
+/** Referencia única y legible para Wompi: SKD-<timestamp en base 36>-<8 hex aleatorios>. */
 const generateReference = () =>
   `SKD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
 /**
  * Crea una orden PENDING a partir de variantes y cantidades.
  * El precio SIEMPRE se toma de la base de datos (final_price), nunca del cliente.
+ * El stock se valida aquí pero NO se descuenta: eso ocurre al aprobarse el pago.
+ *
+ * @param {object} input
+ * @param {{ name: string, email: string, address: string, city: string, phonePrimary: string, phoneSecondary: string | null }} input.customer
+ * @param {Array<{ variantId: number, quantity: number }>} input.items
+ * @returns {Promise<{ id: string, reference: string, amount_in_cents: number, currency: string }>}
+ * @throws {HttpError} 409 si una variante no existe, el producto está oculto o no hay stock suficiente.
  */
 export async function createOrder({ customer, items }) {
   // Agrupa cantidades por variante (por si el carrito trae la misma variante repetida).
@@ -64,6 +72,11 @@ export async function createOrder({ customer, items }) {
   });
 }
 
+/**
+ * SQL que suma o resta al stock las cantidades de una orden ($1 = id de la orden).
+ * GREATEST(…, 0) evita stock negativo si se vendió más de lo disponible mientras el pago estaba pendiente.
+ * @param {'+' | '-'} operator
+ */
 const STOCK_DELTA_SQL = (operator) => `
   UPDATE product_variants v
      SET stock = GREATEST(v.stock ${operator} oi.quantity, 0)
@@ -76,6 +89,10 @@ const STOCK_DELTA_SQL = (operator) => `
  * así que aplicar la misma transacción N veces produce el mismo resultado.
  *
  * `tx` debe venir de la API de Wompi (getTransaction), no del navegador.
+ *
+ * @param {{ id: string, reference: string, status: string, amount_in_cents: number, currency: string,
+ *           status_message?: string, payment_method_type?: string }} tx Transacción de Wompi.
+ * @returns {Promise<{ applied: boolean, reason?: string, from?: string, to?: string }>} Qué se hizo (para el log).
  */
 export async function applyTransaction(tx) {
   return withTransaction(async (db) => {

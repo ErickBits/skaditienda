@@ -8,6 +8,7 @@ import { useCart } from '../context/CartContext';
 import { api, fieldErrors } from '../lib/api';
 import { formatCOP } from '../lib/format';
 
+/** Campos del formulario; cada `name` coincide con el esquema `customer` del servidor. */
 const FIELDS = [
   { name: 'name', label: 'Nombre completo', autoComplete: 'name', required: true },
   { name: 'email', label: 'Correo electrónico', type: 'email', autoComplete: 'email', required: true },
@@ -28,6 +29,7 @@ export default function CheckoutPage() {
     return <div className="container empty"><h3>No hay productos para pagar</h3><Link to="/" className="btn btn--dark">Volver a la tienda</Link></div>;
   }
 
+  /** Crea la orden en el servidor y redirige a Wompi. Los errores de validación se muestran junto a cada campo. */
   const onSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -40,6 +42,7 @@ export default function CheckoutPage() {
       });
       window.location.assign(checkoutUrl); // → Web Checkout de Wompi
     } catch (err) {
+      // El servidor devuelve rutas como "customer.email": se quita el prefijo para mapearlas a cada input.
       const byField = Object.fromEntries(Object.entries(fieldErrors(err)).map(([k, v]) => [k.replace('customer.', ''), v]));
       setErrors(byField);
       setError(Object.keys(byField).length ? 'Revisa los datos marcados.' : err.message);

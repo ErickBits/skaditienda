@@ -7,6 +7,8 @@ import { env } from './env.js';
 // BIGINT (OID 20) llega como string por defecto; nuestros montos caben de sobra en Number.
 pg.types.setTypeParser(20, (value) => Number(value));
 
+// Valor de DATABASE_SSL → opción `ssl` de pg. 'no-verify' cifra pero no valida el
+// certificado (algunos proveedores gestionados lo requieren).
 const SSL_MODES = {
   false: false,
   true: { rejectUnauthorized: true },
@@ -23,12 +25,21 @@ export const pool = new pg.Pool({
 
 pool.on('error', (err) => console.error('[db] error en un cliente inactivo:', err.message));
 
-/** Consulta simple con parámetros ($1, $2...). Nunca concatenes valores en el SQL. */
+/**
+ * Consulta simple con parámetros ($1, $2...). Nunca concatenes valores en el SQL.
+ * @param {string} text SQL con marcadores $n.
+ * @param {unknown[]} [params] Valores para los marcadores, en orden.
+ * @returns {Promise<import('pg').QueryResult>}
+ */
 export const query = (text, params) => pool.query(text, params);
 
 /**
  * Ejecuta `fn(client)` dentro de una transacción.
  * Hace COMMIT si termina bien y ROLLBACK si lanza un error.
+ * Dentro de `fn` usa siempre `client` (no `pool`/`query`), o la consulta quedará fuera de la transacción.
+ * @template T
+ * @param {(client: import('pg').PoolClient) => Promise<T>} fn Trabajo a ejecutar.
+ * @returns {Promise<T>} Lo que devuelva `fn`.
  */
 export async function withTransaction(fn) {
   const client = await pool.connect();

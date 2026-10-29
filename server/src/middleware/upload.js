@@ -14,19 +14,23 @@ import multer from 'multer';
 import { env } from '../config/env.js';
 import { HttpError } from '../utils/http.js';
 
+// MIME permitido → extensión con la que se guarda el archivo.
 const EXTENSIONS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 
+// Verificación de magic bytes por MIME (los primeros 12 bytes del archivo bastan).
 const SIGNATURES = {
   'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
   'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
   'image/webp': (b) => b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP',
 };
 
+// Guarda en UPLOAD_PATH con nombre UUID + extensión deducida del MIME.
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, env.UPLOAD_PATH),
   filename: (_req, file, cb) => cb(null, `${crypto.randomUUID()}${EXTENSIONS[file.mimetype]}`),
 });
 
+/** Middleware: recibe hasta 8 imágenes del campo "images" y las deja en `req.files`. */
 export const uploadImages = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024, files: 8, fields: 10 },
@@ -34,14 +38,26 @@ export const uploadImages = multer({
     EXTENSIONS[file.mimetype] ? cb(null, true) : cb(new HttpError(400, 'Solo se permiten imágenes JPG, PNG o WEBP')),
 }).array('images', 8);
 
+/**
+ * Borra archivos del disco; ignora los que ya no existen.
+ * @param {string[]} filePaths Rutas absolutas.
+ */
 export async function removeFiles(filePaths) {
   await Promise.all(filePaths.map((p) => fs.unlink(p).catch(() => {})));
 }
 
-/** Convierte "/uploads/abc.jpg" en su ruta absoluta en disco (solo dentro de UPLOAD_PATH). */
+/**
+ * Convierte "/uploads/abc.jpg" en su ruta absoluta en disco.
+ * `path.basename` descarta cualquier directorio, así la ruta nunca sale de UPLOAD_PATH.
+ * @param {string} url URL pública de la imagen.
+ * @returns {string}
+ */
 export const uploadUrlToPath = (url) => path.join(env.UPLOAD_PATH, path.basename(url));
 
-/** Rechaza (y borra) los archivos cuyo contenido no sea realmente una imagen. */
+/**
+ * Middleware (va después de `uploadImages`): rechaza con 400, y borra del disco,
+ * todos los archivos si alguno no es realmente una imagen.
+ */
 export async function verifyImageSignatures(req, _res, next) {
   const files = req.files ?? [];
   try {

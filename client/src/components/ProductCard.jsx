@@ -14,6 +14,7 @@ import './ProductCard.css';
 
 const ease = [0.22, 1, 0.36, 1];
 
+// Variantes de animación: la tarjeta propaga el estado (hidden/visible/hover) a sus hijos.
 const card = {
   hidden: { opacity: 0, y: 28 },
   visible: (i) => ({ opacity: 1, y: 0, transition: { duration: 0.7, ease, delay: (i % 4) * 0.08 } }),
@@ -23,6 +24,11 @@ const photo = { visible: { scale: 1 }, hover: { scale: 1.07, transition: { durat
 const altPhoto = { hidden: { opacity: 0 }, visible: { opacity: 0 }, hover: { opacity: 1, transition: { duration: 0.6 } } };
 const cta = { hidden: { opacity: 0, y: 12 }, visible: { opacity: 0, y: 12 }, hover: { opacity: 1, y: 0, transition: { duration: 0.45, ease } } };
 
+/**
+ * @param {object} props
+ * @param {object} props.product Producto con forma de tarjeta (images, price, final_price, slug…).
+ * @param {number} [props.index=0] Posición en la grilla; escalona la animación de entrada.
+ */
 export default function ProductCard({ product, index = 0 }) {
   const [primary, secondary] = product.images ?? [];
   const onSale = product.final_price < product.price;

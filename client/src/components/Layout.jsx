@@ -4,6 +4,7 @@ import { useCart } from '../context/CartContext';
 import { api } from '../lib/api';
 import './Layout.css';
 
+/** Ícono de bolsa de compras (decorativo: el texto accesible está en el enlace). */
 function CartIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
@@ -13,6 +14,10 @@ function CartIcon() {
   );
 }
 
+/**
+ * Estructura común de la tienda: cabecera (marca, buscador, carrito y categorías),
+ * el contenido de la ruta actual (<Outlet />) y el pie de página.
+ */
 export default function Layout() {
   const { count } = useCart();
   const [categories, setCategories] = useState([]);
@@ -25,9 +30,11 @@ export default function Layout() {
   }, []);
 
   useEffect(() => {
+    // Al cambiar de página vuelve arriba (el router no lo hace solo).
     window.scrollTo(0, 0);
   }, [pathname]);
 
+  /** Envía la búsqueda a /buscar?q=… (ignora textos vacíos). */
   const onSearch = (e) => {
     e.preventDefault();
     const q = search.trim();

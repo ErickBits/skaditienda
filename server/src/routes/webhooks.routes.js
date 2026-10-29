@@ -14,6 +14,7 @@ import { getTransaction, verifyEventSignature } from '../services/wompi.service.
 
 const router = Router();
 
+/** POST /wompi — Recibe los eventos de Wompi y actualiza la orden correspondiente. */
 router.post('/wompi', async (req, res) => {
   const event = req.body;
 

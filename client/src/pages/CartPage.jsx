@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { useCart } from '../context/CartContext';
 import { formatCOP } from '../lib/format';
 
+/** Carrito: editar cantidades, quitar productos y continuar al checkout. */
 export default function CartPage() {
   const { items, subtotal, updateQuantity, removeItem } = useCart();
 

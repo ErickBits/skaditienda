@@ -4,6 +4,10 @@ import FeaturedBanner from '../components/FeaturedBanner';
 import ProductCard from '../components/ProductCard';
 import { api } from '../lib/api';
 
+/**
+ * Portada: banner de destacados, productos en descuento y novedades.
+ * `null` significa "cargando" (se muestran esqueletos).
+ */
 export default function Home() {
   const [featured, setFeatured] = useState(null);
   const [latest, setLatest] = useState(null);

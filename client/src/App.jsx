@@ -16,6 +16,7 @@ const ProductForm = lazy(() => import('./admin/ProductForm'));
 const AdminBanner = lazy(() => import('./admin/AdminBanner'));
 const AdminOrders = lazy(() => import('./admin/AdminOrders'));
 
+/** Rutas de la aplicación: tienda pública dentro de <Layout> y panel admin bajo /admin. */
 export default function App() {
   return (
     <Suspense fallback={null}>

@@ -11,7 +11,11 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { pool } from '../src/config/db.js';
 
-/** Pide un texto por consola sin hacer eco de lo que se escribe. */
+/**
+ * Pide un texto por consola sin hacer eco de lo que se escribe (para contraseñas).
+ * @param {string} question Texto que se muestra al usuario.
+ * @returns {Promise<string>} Lo que el usuario escribió.
+ */
 function promptHidden(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
@@ -43,6 +47,8 @@ if (!process.env.ADMIN_PASSWORD && (await promptHidden('Confirma la contraseña:
 }
 
 try {
+  // Upsert: crea el admin o, si el correo ya existe, solo cambia la contraseña.
+  // `xmax = 0` solo es cierto en filas recién insertadas → distingue "creado" de "actualizado".
   const hash = await bcrypt.hash(password, 12);
   const { rows: [admin] } = await pool.query(
     `INSERT INTO admins (email, password_hash) VALUES ($1, $2)

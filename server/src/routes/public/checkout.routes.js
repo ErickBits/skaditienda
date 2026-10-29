@@ -21,6 +21,7 @@ const checkoutLimiter = rateLimit({
   message: { error: 'Demasiados intentos de compra. Espera unos minutos.' },
 });
 
+// Teléfono: dígitos, espacios, guiones y + opcional (7 a 20 caracteres).
 const phone = z.string().trim().regex(/^\+?[0-9\s-]{7,20}$/, 'Teléfono inválido');
 
 const checkoutSchema = z.object({
@@ -38,6 +39,10 @@ const checkoutSchema = z.object({
     .max(50),
 });
 
+/**
+ * POST / — Valida los datos del cliente, crea la orden PENDING (con precios de la BD)
+ * y devuelve la URL firmada del Web Checkout de Wompi a la que debe ir el navegador.
+ */
 router.post('/', checkoutLimiter, validate({ body: checkoutSchema }), async (req, res) => {
   const { customer } = req.valid.body;
   const order = await createOrder(req.valid.body);
@@ -55,7 +60,8 @@ router.post('/', checkoutLimiter, validate({ body: checkoutSchema }), async (req
 });
 
 /**
- * Página de resultado: Wompi redirige a /pago/resultado?id=<transactionId>.
+ * GET /transaction/:id — Estado del pago para la página de resultado.
+ * Wompi redirige a /pago/resultado?id=<transactionId>.
  * Ese `id` viene del navegador, por eso NO se confía en él: se consulta la
  * transacción en la API de Wompi y se aplica (idempotente) por si el webhook
  * todavía no llegó. Solo se devuelven datos no sensibles.

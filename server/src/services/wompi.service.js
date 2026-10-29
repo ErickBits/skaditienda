@@ -25,21 +25,41 @@ const CHECKOUT_URL = 'https://checkout.wompi.co/p/';
 /** Valor de `environment` que Wompi envía en sus eventos. */
 const EVENT_ENVIRONMENT = env.WOMPI_ENV === 'production' ? 'prod' : 'test';
 
+/** Hash SHA-256 en hexadecimal. */
 const sha256 = (text) => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 
-/** Compara dos hashes hex en tiempo constante (evita ataques de temporización). */
+/**
+ * Compara dos hashes hex en tiempo constante (evita ataques de temporización), sin
+ * distinguir mayúsculas.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
 function safeEqualHex(a, b) {
   const bufA = Buffer.from(String(a).toLowerCase(), 'utf8');
   const bufB = Buffer.from(String(b).toLowerCase(), 'utf8');
   return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
 }
 
-/** Firma de integridad: SHA256("<referencia><monto_en_centavos><moneda><secreto_integridad>") */
+/**
+ * Firma de integridad: SHA256("<referencia><monto_en_centavos><moneda><secreto_integridad>").
+ * Wompi la recalcula y rechaza el pago si alguien alteró la referencia, el monto o la moneda.
+ * @param {{ reference: string, amountInCents: number, currency?: string }} params
+ * @returns {string} Hash hexadecimal.
+ */
 export function integritySignature({ reference, amountInCents, currency = 'COP' }) {
   return sha256(`${reference}${amountInCents}${currency}${env.WOMPI_INTEGRITY_SECRET}`);
 }
 
-/** URL del Web Checkout de Wompi con todos los parámetros firmados. */
+/**
+ * URL del Web Checkout de Wompi con todos los parámetros firmados.
+ * @param {object} params
+ * @param {string} params.reference Referencia de la orden.
+ * @param {number} params.amountInCents Monto total en centavos.
+ * @param {string} [params.currency='COP']
+ * @param {{ email: string, name: string }} params.customer Datos para precargar el formulario de Wompi.
+ * @returns {string}
+ */
 export function buildCheckoutUrl({ reference, amountInCents, currency = 'COP', customer }) {
   const params = new URLSearchParams({
     'public-key': env.WOMPI_PUBLIC_KEY,
@@ -62,6 +82,10 @@ const readPath = (obj, dottedPath) => dottedPath.split('.').reduce((acc, key) =>
  *
  * checksum = SHA256( valores de signature.properties (en orden, tomados de event.data)
  *                    + timestamp + secreto_de_eventos )
+ *
+ * También rechaza eventos de otro ambiente (sandbox vs. producción).
+ * @param {object} event Cuerpo del webhook tal como llega.
+ * @returns {boolean}
  */
 export function verifyEventSignature(event) {
   const { signature, timestamp, data, environment } = event ?? {};
@@ -80,6 +104,9 @@ export function verifyEventSignature(event) {
 /**
  * Consulta una transacción directamente en la API de Wompi (fuente autoritativa).
  * Devuelve `null` si no existe.
+ * @param {string} transactionId
+ * @returns {Promise<object | null>} El objeto `data` de la respuesta de Wompi.
+ * @throws {Error} Si Wompi responde con otro error o tarda más de 10 s (el webhook responde 5xx y Wompi reintenta).
  */
 export async function getTransaction(transactionId) {
   const res = await fetch(`${API_URL}/transactions/${encodeURIComponent(transactionId)}`, {

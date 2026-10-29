@@ -1,6 +1,9 @@
 import { formatCOP } from '../lib/format';
 
-/** Precio con indicador visual de descuento (precio anterior tachado). */
+/**
+ * Precio con indicador visual de descuento (precio anterior tachado).
+ * @param {{ price: number, finalPrice: number, size?: 'lg' }} props Precios en pesos COP.
+ */
 export default function Price({ price, finalPrice, size }) {
   const onSale = finalPrice < price;
   return (

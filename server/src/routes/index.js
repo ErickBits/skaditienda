@@ -12,6 +12,7 @@ import { query } from '../config/db.js';
 
 const api = Router();
 
+// Comprueba que la API y la base de datos respondan (para el monitoreo del hosting).
 api.get('/health', async (_req, res) => {
   await query('SELECT 1');
   res.json({ ok: true });

@@ -10,6 +10,12 @@ import { env } from './config/env.js';
 import apiRoutes from './routes/index.js';
 import { apiNotFound, errorHandler } from './middleware/error.js';
 
+/**
+ * Construye la aplicación Express: seguridad (helmet, rate limit), API, imágenes
+ * subidas y, en producción, los archivos estáticos de la SPA.
+ * Está separada de index.js para poder crearla sin abrir un puerto (p. ej. en pruebas).
+ * @returns {import('express').Express}
+ */
 export function createApp() {
   const app = express();
 

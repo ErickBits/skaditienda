@@ -25,6 +25,8 @@ const WOMPI_PREFIXES = {
   production: { WOMPI_PUBLIC_KEY: 'pub_prod_', WOMPI_INTEGRITY_SECRET: 'prod_integrity_', WOMPI_EVENTS_SECRET: 'prod_events_' },
 };
 
+// Esquema de todas las variables. `superRefine` comprueba además que cada llave de
+// Wompi tenga el prefijo del ambiente elegido (evita mezclar sandbox y producción).
 const schema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -59,6 +61,8 @@ if (parsed.data.NODE_ENV === 'production' && parsed.data.WOMPI_ENV !== 'producti
   console.warn('⚠️  NODE_ENV=production pero WOMPI_ENV=sandbox: los pagos NO serán reales.');
 }
 
+// Configuración final e inmutable. Agrega valores derivados:
+// isProd, ROOT_DIR (raíz del monorepo) y UPLOAD_PATH (ruta absoluta de las imágenes).
 export const env = Object.freeze({
   ...parsed.data,
   isProd: parsed.data.NODE_ENV === 'production',

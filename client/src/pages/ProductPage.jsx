@@ -5,6 +5,7 @@ import Price from '../components/Price';
 import { useCart } from '../context/CartContext';
 import { api } from '../lib/api';
 
+/** Detalle de producto: galería, selección de color → talla (según stock) y agregar al carrito. */
 export default function ProductPage() {
   const { slug } = useParams();
   const { addItem } = useCart();
@@ -24,6 +25,7 @@ export default function ProductPage() {
       .then((p) => {
         setProduct(p);
         setImageIndex(0);
+        // Preselecciona el primer color con stock; la talla la elige el usuario.
         const firstAvailable = p.variants.find((v) => v.stock > 0);
         setColor(firstAvailable?.color ?? '');
         setSize('');
@@ -31,6 +33,7 @@ export default function ProductPage() {
       .catch((e) => setError(e.status === 404 ? 'Este producto ya no está disponible.' : e.message));
   }, [slug]);
 
+  // Colores únicos, tallas del color elegido y la variante (talla + color) seleccionada.
   const colors = useMemo(() => [...new Set(product?.variants.map((v) => v.color) ?? [])], [product]);
   const sizesForColor = useMemo(() => product?.variants.filter((v) => v.color === color) ?? [], [product, color]);
   const variant = sizesForColor.find((v) => v.size === size);
@@ -41,6 +44,7 @@ export default function ProductPage() {
   const onSale = product.final_price < product.price;
   const images = product.images;
 
+  /** Agrega la variante elegida al carrito y muestra la confirmación durante 2,5 s. */
   const add = () => {
     if (!variant) return;
     addItem(
