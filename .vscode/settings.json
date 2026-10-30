@@ -1,0 +1,6 @@
+{
+  // Los .sql de este proyecto son MySQL/MariaDB, no T-SQL: la extensión de SQL Server (mssql)
+  // marcaría como error sintaxis válida (AUTO_INCREMENT, ENGINE, INSERT IGNORE…).
+  "mssql.intelliSense.enableErrorChecking": false,
+  "mssql.autoDisableNonTSqlLanguageService": true
+}

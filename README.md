@@ -1,6 +1,6 @@
 # Skaditienda
 
-E-commerce monolítico: **React + Vite** (tienda y panel) · **Express 5** (API) · **PostgreSQL** · **Wompi** (pagos).
+E-commerce monolítico: **React + Vite** (tienda y panel) · **Express 5** (API) · **MySQL / MariaDB** · **Wompi** (pagos).
 En producción un solo proceso Node sirve la API y el build de React.
 
 ## Arquitectura
@@ -11,7 +11,7 @@ skaditienda/
 ├── .env.example              # plantilla → .env.development / .env.production
 ├── server/
 │   ├── db/
-│   │   ├── schema.sql        # esquema idempotente
+│   │   ├── schema.sql        # esquema idempotente (MySQL 8.0.16+ / MariaDB 10.5+)
 │   │   ├── seed.sql          # categorías base
 │   │   └── seed-demo.sql     # productos demo (solo desarrollo)
 │   ├── scripts/
@@ -41,6 +41,10 @@ skaditienda/
 ## Puesta en marcha (desarrollo)
 
 ```bash
+# MariaDB local en Docker (la primera vez; luego basta `docker start skadi-mysql`)
+docker run -d --name skadi-mysql -p 3306:3306 -v skadi-mysqldata:/var/lib/mysql \
+  -e MARIADB_ROOT_PASSWORD=root -e MARIADB_DATABASE=skaditienda -e MARIADB_USER=skadi -e MARIADB_PASSWORD=skadi mariadb:11.4
+
 npm install
 cp .env.example .env.development      # completa DATABASE_URL, JWT_SECRET y llaves sandbox de Wompi
 npm run db:init -- --demo             # esquema + categorías + productos demo
@@ -63,8 +67,9 @@ npm start                      # NODE_ENV=production, sirve API + tienda en PORT
 
 - **App Node.js** (planes Business/Cloud): comando de build `npm install && npm run build`, archivo de inicio `server/src/index.js`
   (o `npm start`), y define las variables de entorno en el panel con `NODE_ENV=production`.
-- **PostgreSQL:** el hosting compartido/cloud de Hostinger solo trae MySQL. Usa un **VPS de Hostinger** (instalas Postgres + PM2 + Nginx)
-  o un Postgres gestionado externo (Neon, Supabase…) con `DATABASE_SSL=true`.
+- **Base de datos:** crea una base MySQL en hPanel (*Bases de datos → Administración*) y pon sus datos en
+  `DATABASE_URL=mysql://usuario:contraseña@localhost:3306/nombre_bd` (si la contraseña tiene símbolos, codifícala en la URL).
+  Luego ejecuta una vez `npm run db:init` y `npm run admin:create -- tu@correo.com` (por SSH o desde la terminal de la app).
 - `APP_URL` = tu dominio con https. En Wompi (producción) configura la URL de eventos `https://tu-dominio/api/webhooks/wompi`.
 - `server/uploads/` debe ser persistente entre despliegues (respáldalo junto con la base de datos).
 
@@ -107,7 +112,7 @@ Talla y color se evalúan sobre **la misma variante con stock** (un "40 negro" r
   Se revalida en cada petición que el admin siga existiendo.
 - **CSRF:** SameSite=Strict + verificación de `Origin` contra `APP_URL` en toda petición que modifique datos.
 - **Fuerza bruta:** 5 intentos fallidos / 15 min por IP; hash señuelo para no revelar qué correos existen.
-- **Entradas:** todo body/query/params pasa por Zod; SQL 100 % parametrizado; comodines de `ILIKE` escapados.
+- **Entradas:** todo body/query/params pasa por Zod; SQL 100 % parametrizado; comodines de `LIKE` escapados.
 - **Imágenes:** solo JPG/PNG/WEBP ≤ 5 MB, nombre UUID generado por el servidor y verificación de *magic bytes*
   (un HTML renombrado a `.png` se rechaza y se borra).
 - **Cabeceras:** Helmet (CSP, HSTS, nosniff, frame-ancestors) y rate limit general en `/api`.
@@ -115,6 +120,6 @@ Talla y color se evalúan sobre **la misma variante con stock** (un "40 negro" r
 ### Recomendaciones operativas
 - Usa un `JWT_SECRET` aleatorio de 64+ caracteres distinto por ambiente; rotarlo cierra todas las sesiones.
 - Fuerza HTTPS en el dominio (Hostinger lo ofrece con SSL gratuito).
-- Respalda PostgreSQL y `server/uploads/` a diario.
+- Respalda la base de datos y `server/uploads/` a diario.
 - Revisa periódicamente las órdenes en `PENDING` antiguas (pagos abandonados) y `ERROR` (posibles manipulaciones).
 # skaditienda
