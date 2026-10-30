@@ -9,7 +9,7 @@
 import readline from 'node:readline';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { pool } from '../src/config/db.js';
+import { pool, query } from '../src/config/db.js';
 
 /**
  * Pide un texto por consola sin hacer eco de lo que se escribe (para contraseñas).
@@ -47,16 +47,16 @@ if (!process.env.ADMIN_PASSWORD && (await promptHidden('Confirma la contraseña:
 }
 
 try {
-  // Upsert: crea el admin o, si el correo ya existe, solo cambia la contraseña.
-  // `xmax = 0` solo es cierto en filas recién insertadas → distingue "creado" de "actualizado".
+  // Crea el admin o, si el correo ya existe, solo cambia la contraseña.
   const hash = await bcrypt.hash(password, 12);
-  const { rows: [admin] } = await pool.query(
-    `INSERT INTO admins (email, password_hash) VALUES ($1, $2)
-     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
-     RETURNING id, email, (xmax = 0) AS created`,
-    [email.data, hash],
-  );
-  console.log(admin.created ? `✔ Administrador creado: ${admin.email}` : `✔ Contraseña actualizada: ${admin.email}`);
+  const { rows: [existing] } = await query('SELECT id FROM admins WHERE email = ?', [email.data]);
+  if (existing) {
+    await query('UPDATE admins SET password_hash = ? WHERE id = ?', [hash, existing.id]);
+    console.log(`✔ Contraseña actualizada: ${email.data}`);
+  } else {
+    await query('INSERT INTO admins (email, password_hash) VALUES (?, ?)', [email.data, hash]);
+    console.log(`✔ Administrador creado: ${email.data}`);
+  }
 } catch (err) {
   console.error('❌', err.message);
   process.exitCode = 1;

@@ -74,7 +74,7 @@ router.get(
     if (!tx) throw new HttpError(404, 'Transacción no encontrada');
 
     await applyTransaction(tx);
-    const { rows: [order] } = await query('SELECT reference, status FROM orders WHERE reference = $1', [tx.reference]);
+    const { rows: [order] } = await query('SELECT reference, status FROM orders WHERE reference = ?', [tx.reference]);
     if (!order) throw new HttpError(404, 'Orden no encontrada');
 
     res.json({ reference: order.reference, status: order.status, amountInCents: tx.amount_in_cents });

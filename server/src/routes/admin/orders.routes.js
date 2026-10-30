@@ -26,26 +26,27 @@ router.get('/', validate({ query: listQuery }), async (req, res) => {
   const f = req.valid.query;
   const where = [];
   const params = [];
-  // Agrega un valor a `params` y devuelve su marcador ($1, $2…): el SQL nunca lleva valores del usuario.
-  const param = (value) => `$${params.push(value)}`;
+  // Agrega un valor a `params` y devuelve su marcador `?`: el SQL nunca lleva valores del usuario.
+  const param = (value) => (params.push(value), '?');
 
   if (f.status !== 'ALL') where.push(`o.status = ${param(f.status)}`);
   if (f.dispatched !== 'all') where.push(`o.dispatched = ${param(f.dispatched === 'true')}`);
-  if (f.from) where.push(`o.created_at >= ${param(f.from)}::date`);
-  if (f.to) where.push(`o.created_at < ${param(f.to)}::date + 1`);
+  if (f.from) where.push(`o.created_at >= ${param(f.from)}`);
+  if (f.to) where.push(`o.created_at < DATE_ADD(${param(f.to)}, INTERVAL 1 DAY)`);
   if (f.q) {
-    const like = param(`%${escapeLike(f.q)}%`);
-    where.push(`(o.reference ILIKE ${like} OR o.customer_name ILIKE ${like} OR o.customer_email ILIKE ${like})`);
+    // Con `?` cada marcador consume un valor: el patrón se agrega tres veces.
+    const like = `%${escapeLike(f.q)}%`;
+    where.push(`(o.reference LIKE ${param(like)} OR o.customer_name LIKE ${param(like)} OR o.customer_email LIKE ${param(like)})`);
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  // `count(*) OVER()` trae el total sin paginar en la misma consulta.
+  // `COUNT(*) OVER()` trae el total sin paginar en la misma consulta.
   // LIMIT/OFFSET se interpolan porque Zod ya garantizó que son enteros.
   const { rows } = await query(
     `SELECT o.id, o.reference, o.customer_name, o.customer_email, o.city, o.amount_in_cents, o.status,
             o.dispatched, o.dispatched_at, o.paid_at, o.created_at,
-            (SELECT COALESCE(sum(quantity), 0)::int FROM order_items oi WHERE oi.order_id = o.id) AS units,
-            count(*) OVER()::int AS total_count
+            (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS units,
+            COUNT(*) OVER() AS total_count
        FROM orders o
        ${whereSql}
       ORDER BY o.created_at DESC
@@ -61,10 +62,10 @@ const idParams = z.object({ id: z.uuid() });
 
 /** GET /:id — Detalle de una orden con sus ítems (foto del producto al momento de la compra). */
 router.get('/:id', validate({ params: idParams }), async (req, res) => {
-  const { rows: [order] } = await query('SELECT * FROM orders WHERE id = $1', [req.valid.params.id]);
+  const { rows: [order] } = await query('SELECT * FROM orders WHERE id = ?', [req.valid.params.id]);
   if (!order) throw new HttpError(404, 'Orden no encontrada');
   const { rows: items } = await query(
-    'SELECT product_name, size, color, unit_price, quantity FROM order_items WHERE order_id = $1 ORDER BY id',
+    'SELECT product_name, size, color, unit_price, quantity FROM order_items WHERE order_id = ? ORDER BY id',
     [order.id],
   );
   res.json({ ...order, items });
@@ -76,14 +77,15 @@ router.patch(
   validate({ params: idParams, body: z.object({ dispatched: z.boolean() }) }),
   async (req, res) => {
     const { dispatched } = req.valid.body;
-    const { rows: [order] } = await query(
+    const { id } = req.valid.params;
+    const { rowCount } = await query(
       `UPDATE orders
-          SET dispatched = $2, dispatched_at = CASE WHEN $2 THEN now() ELSE NULL END
-        WHERE id = $1 AND status = 'APPROVED'
-        RETURNING id, dispatched, dispatched_at`,
-      [req.valid.params.id, dispatched],
+          SET dispatched = ?, dispatched_at = CASE WHEN ? THEN NOW() ELSE NULL END
+        WHERE id = ? AND status = 'APPROVED'`,
+      [dispatched, dispatched, id],
     );
-    if (!order) throw new HttpError(409, 'Solo se pueden despachar órdenes pagadas (APPROVED)');
+    if (!rowCount) throw new HttpError(409, 'Solo se pueden despachar órdenes pagadas (APPROVED)');
+    const { rows: [order] } = await query('SELECT id, dispatched, dispatched_at FROM orders WHERE id = ?', [id]);
     res.json(order);
   },
 );

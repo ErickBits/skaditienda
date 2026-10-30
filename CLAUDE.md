@@ -4,14 +4,14 @@ E-commerce monolítico de moda masculina (Colombia, precios en COP). Despliegue 
 Idioma del proyecto y de la comunicación con el usuario: **español**. Código, comentarios y textos de UI en español.
 
 ## Stack
-- `server/`: Node + **Express 5** (ESM), `pg`, Zod 4, helmet, express-rate-limit, multer, bcryptjs, jsonwebtoken.
+- `server/`: Node + **Express 5** (ESM), `mysql2`, Zod 4, helmet, express-rate-limit, multer, bcryptjs, jsonwebtoken.
 - `client/`: **React 19 + Vite 8**, `react-router` v8 (importar desde `react-router`, no `react-router-dom`), `framer-motion`, CSS plano con variables (sin Tailwind).
-- **PostgreSQL** · pagos con **Wompi** (Web Checkout por redirección + webhook).
+- **MySQL 8.0.16+ / MariaDB 10.5+** (driver `mysql2`) · pagos con **Wompi** (Web Checkout por redirección + webhook).
 - npm workspaces; en producción un solo proceso Express sirve la API y `client/dist`.
 
 ## Comandos
 ```bash
-docker start skadi-pg                    # Postgres local (contenedor postgres:17-alpine, user/pass/db: skadi/skadi/skaditienda, puerto 5432, volumen skadi-pgdata)
+docker start skadi-mysql                 # MariaDB local (contenedor mariadb:11.4, user/pass/db: skadi/skadi/skaditienda, puerto 3306, volumen skadi-mysqldata; root/root)
 npm run dev                              # API :3000 + Vite :5173 → http://localhost:5173 (admin en /admin)
 npm run build                            # build del cliente
 npm start                                # producción (NODE_ENV=production)
@@ -35,19 +35,28 @@ npm run admin:create -- correo@x.com     # crea admin / cambia contraseña (ADMI
 - **Estilo visual "lujo silencioso":** marfil `--bg #f7f3ec`, carbón `--noir #14120f`, dorado `--gold #b08d57`. Tipografías Cormorant Garamond (títulos) y Manrope (texto). Bordes muy redondeados y animaciones suaves con ease `[0.22,1,0.36,1]`. `<MotionConfig reducedMotion="user">`.
 - El panel admin se carga con `lazy()` para que no entre en el bundle de la tienda.
 
+## Base de datos (MySQL/MariaDB)
+- Migrado desde PostgreSQL el 2026-10-30 para poder usar el hosting compartido/cloud de Hostinger. El SQL debe funcionar en **ambos** MySQL 8 y MariaDB (Hostinger puede usar cualquiera); se probó en MariaDB 11.4 y MySQL 8.4.
+- `config/db.js` expone `query(sql, params)` y `withTransaction(fn)` que devuelven `{ rows, rowCount, insertId }`. Marcadores `?` (no `$1`); un arreglo se expande en `IN (?)` y `VALUES ?` acepta arreglo de filas.
+- Sin `RETURNING`: hacer UPDATE y luego SELECT. Los UUID de `orders.id` se generan en Node (`crypto.randomUUID()`).
+- Fechas `DATETIME` en UTC: la conexión fija `time_zone = '+00:00'` y mysql2 usa `timezone: 'Z'`.
+- `typeCast` convierte `TINYINT(1)` en booleano (el panel reenvía esos valores a Zod `z.boolean()`); `decimalNumbers` hace que `SUM()` llegue como Number.
+- Collation `utf8mb4_unicode_ci`: `LIKE` no distingue mayúsculas **ni tildes**, y los UNIQUE tampoco (talla "M"/"m" es la misma variante).
+
 ## Trampas ya encontradas
-- En queries con parámetros que van a columnas enum usa **cast explícito** (`$2::order_status`); si no, PostgreSQL falla con "inconsistent types deduced". Lo mismo con `$1::uuid` en `INSERT … SELECT`.
+- **No usar** en SQL: `ORDER BY` dentro de `JSON_ARRAYAGG` (no existe en MySQL 8), `VALUES … AS alias` en upserts (no existe en MariaDB; usar `VALUES(col)`), `CREATE INDEX IF NOT EXISTS` (no existe en MySQL; índices dentro del `CREATE TABLE`), `NULLS LAST` (usar `col IS NULL, col`).
+- Nunca pasar un arreglo vacío a `IN (?)`: genera `IN ()` y es error de sintaxis.
 - `useEffect(() => fn())` sin llaves devuelve un valor como cleanup → pantalla en blanco (`destroy is not a function`). Usar siempre llaves.
 - Importar `global.css` **antes** que los componentes en `main.jsx` para que el CSS de cada componente pueda sobrescribirlo.
 - Express 5: `req.query` es de solo lectura. Los datos validados van en `req.valid.{body,query,params}` (middleware `validate`).
 - `pkill -f` con un patrón que aparece en tu propio comando mata la shell. Usar PID.
 
-## Estado (2026-10-24)
-- Hecho y probado contra Postgres en Docker:
+## Estado (2026-10-30)
+- Hecho y probado (e2e de la API contra MariaDB 11.4 y MySQL 8.4 en Docker):
   - Catálogo, filtros, checkout, flujo de webhook (con API de Wompi simulada).
   - Auth admin, CRUD de productos con imágenes, banner, órdenes y despacho.
-  - Modo producción sirviendo la SPA.
+  - Modo producción sirviendo la SPA (probado con Postgres; no cambió con la migración).
 - **No probado:** el sandbox real de Wompi (faltan llaves reales del usuario) y la UI del panel admin en el navegador.
-- Hostinger: el hosting compartido/cloud parece ofrecer solo MySQL (por confirmar). Para Postgres hace falta un VPS o un servicio gestionado externo (Neon/Supabase, `DATABASE_SSL=true`). `server/uploads/` debe persistir entre despliegues.
-- El directorio aún **no es repositorio git**.
+- Hostinger: el hosting Web/Cloud solo ofrece MySQL/MariaDB (Postgres solo en VPS), por eso se migró. Falta confirmar que el plan permite apps Node.js. `server/uploads/` debe persistir entre despliegues.
+- Repositorio git: rama de trabajo `dev`, principal `main`.
 - Pendientes posibles: llaves sandbox de Wompi, fotos reales de productos, emails de confirmación, git + despliegue.

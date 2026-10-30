@@ -10,17 +10,32 @@ import { HttpError, escapeLike } from '../../utils/http.js';
 const router = Router();
 
 /**
- * SELECT común para tarjetas de producto (incluye imágenes ordenadas).
+ * SELECT común para tarjetas de producto. Las imágenes se agregan después con `withImages`.
  * @param {string} [extraColumns] Columnas adicionales, terminadas en coma (p. ej. "p.description,").
  * @returns {string} SQL sin WHERE: quien lo usa agrega filtros y orden.
  */
 const cardSelect = (extraColumns = '') => `
   SELECT ${extraColumns} p.id, p.name, p.slug, p.price, p.final_price, p.discount_active, p.discount_percent,
-         c.name AS category_name, c.slug AS category_slug,
-         COALESCE((SELECT json_agg(i.url ORDER BY i.sort_order, i.id)
-                     FROM product_images i WHERE i.product_id = p.id), '[]') AS images
+         c.name AS category_name, c.slug AS category_slug
     FROM products p
     JOIN categories c ON c.id = p.category_id`;
+
+/**
+ * Agrega a cada producto `images`: sus URLs ordenadas, con UNA consulta para toda la página.
+ * (MySQL 8 no admite ORDER BY dentro de JSON_ARRAYAGG, por eso se arma aquí.)
+ * @param {Array<{ id: number }>} products
+ * @returns {Promise<Array<object>>} Los mismos productos con `images: string[]`.
+ */
+async function withImages(products) {
+  if (!products.length) return products;
+  const { rows } = await query(
+    'SELECT product_id, url FROM product_images WHERE product_id IN (?) ORDER BY sort_order, id',
+    [products.map((p) => p.id)],
+  );
+  const byProduct = new Map(products.map((p) => [p.id, []]));
+  for (const { product_id: id, url } of rows) byProduct.get(id).push(url);
+  return products.map((p) => ({ ...p, images: byProduct.get(p.id) }));
+}
 
 // Valor de ?sort= → ORDER BY. Solo se interpolan estos textos fijos, nunca lo que envía el usuario.
 const SORTS = {
@@ -80,11 +95,11 @@ router.get('/products', validate({ query: listQuery }), async (req, res) => {
   const f = req.valid.query;
   const where = ['p.is_active'];
   const params = [];
-  // Agrega un valor a `params` y devuelve su marcador ($1, $2…).
-  const param = (value) => `$${params.push(value)}`;
+  // Agrega un valor a `params` y devuelve su marcador `?` (el orden de los push = orden en el SQL).
+  const param = (value) => (params.push(value), '?');
 
   if (f.category) where.push(`c.slug = ${param(f.category)}`);
-  if (f.q) where.push(`p.name ILIKE ${param(`%${escapeLike(f.q)}%`)}`);
+  if (f.q) where.push(`p.name LIKE ${param(`%${escapeLike(f.q)}%`)}`);
   if (f.discount) where.push('p.final_price < p.price');
   if (f.minPrice !== undefined) where.push(`p.final_price >= ${param(f.minPrice)}`);
   if (f.maxPrice !== undefined) where.push(`p.final_price <= ${param(f.maxPrice)}`);
@@ -93,8 +108,8 @@ router.get('/products', validate({ query: listQuery }), async (req, res) => {
   // "talla 40 + negro" solo muestra productos que tengan un 40 negro disponible.
   if (f.size.length || f.color.length) {
     const conditions = ['v.product_id = p.id', 'v.stock > 0'];
-    if (f.size.length) conditions.push(`v.size = ANY(${param(f.size)}::text[])`);
-    if (f.color.length) conditions.push(`v.color = ANY(${param(f.color)}::text[])`);
+    if (f.size.length) conditions.push(`v.size IN (${param(f.size)})`);
+    if (f.color.length) conditions.push(`v.color IN (${param(f.color)})`);
     where.push(`EXISTS (SELECT 1 FROM product_variants v WHERE ${conditions.join(' AND ')})`);
   }
 
@@ -105,26 +120,26 @@ router.get('/products', validate({ query: listQuery }), async (req, res) => {
   // ORDER BY/LIMIT/OFFSET se interpolan: vienen de SORTS o de enteros ya validados.
   const [{ rows: items }, { rows: [{ total }] }] = await Promise.all([
     query(`${cardSelect()} WHERE ${whereSql} ORDER BY ${SORTS[f.sort]} LIMIT ${f.limit} OFFSET ${offset}`, params),
-    query(`SELECT count(*)::int AS total FROM products p JOIN categories c ON c.id = p.category_id WHERE ${whereSql}`, params),
+    query(`SELECT COUNT(*) AS total FROM products p JOIN categories c ON c.id = p.category_id WHERE ${whereSql}`, params),
   ]);
 
-  res.json({ items, total, page: f.page, pages: Math.max(1, Math.ceil(total / f.limit)) });
+  res.json({ items: await withImages(items), total, page: f.page, pages: Math.max(1, Math.ceil(total / f.limit)) });
 });
 
 /** GET /filters — Tallas y colores disponibles (con stock) para construir los filtros, opcionalmente por categoría. */
 router.get('/filters', validate({ query: z.object({ category: z.string().max(60).optional() }) }), async (req, res) => {
   const { category } = req.valid.query;
   const { rows } = await query(
-    `SELECT array_agg(DISTINCT v.size) AS sizes, array_agg(DISTINCT v.color) AS colors
+    `SELECT DISTINCT v.size, v.color
        FROM product_variants v
        JOIN products p ON p.id = v.product_id AND p.is_active
        JOIN categories c ON c.id = p.category_id
-      WHERE v.stock > 0 AND ($1::text IS NULL OR c.slug = $1)`,
-    [category ?? null],
+      WHERE v.stock > 0 AND (? IS NULL OR c.slug = ?)`,
+    [category ?? null, category ?? null],
   );
   res.json({
-    sizes: (rows[0].sizes ?? []).sort(compareSizes),
-    colors: (rows[0].colors ?? []).sort((a, b) => a.localeCompare(b, 'es')),
+    sizes: [...new Set(rows.map((r) => r.size))].sort(compareSizes),
+    colors: [...new Set(rows.map((r) => r.color))].sort((a, b) => a.localeCompare(b, 'es')),
   });
 });
 
@@ -136,28 +151,29 @@ router.get('/products/featured', async (_req, res) => {
   const { rows } = await query(
     `${cardSelect('p.description,')}
       WHERE p.is_active AND p.is_featured
-      ORDER BY p.featured_order NULLS LAST, p.id
+      ORDER BY p.featured_order IS NULL, p.featured_order, p.id
       LIMIT 10`,
   );
-  res.json(rows);
+  res.json(await withImages(rows));
 });
 
 /** GET /products/:slug — Detalle de un producto activo con sus variantes ordenadas por color y talla. */
 router.get('/products/:slug', validate({ params: z.object({ slug: z.string().max(120) }) }), async (req, res) => {
   const { rows: [product] } = await query(
     `${cardSelect('p.description,')}
-      WHERE p.slug = $1 AND p.is_active`,
+      WHERE p.slug = ? AND p.is_active`,
     [req.valid.params.slug],
   );
   if (!product) throw new HttpError(404, 'Producto no encontrado');
+  const [withGallery] = await withImages([product]);
 
   const { rows: variants } = await query(
-    'SELECT id, size, color, stock FROM product_variants WHERE product_id = $1 ORDER BY color, id',
+    'SELECT id, size, color, stock FROM product_variants WHERE product_id = ? ORDER BY color, id',
     [product.id],
   );
   variants.sort((a, b) => a.color.localeCompare(b.color, 'es') || compareSizes(a.size, b.size));
 
-  res.json({ ...product, variants });
+  res.json({ ...withGallery, variants });
 });
 
 export default router;

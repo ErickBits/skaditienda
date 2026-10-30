@@ -75,40 +75,40 @@ const withUploadCleanup = (handler) => async (req, res) => {
 
 /**
  * Agrega imágenes nuevas al final de la galería (después del sort_order más alto).
- * @param {import('pg').PoolClient} db Cliente de la transacción.
+ * @param {{ query: Function }} db Conexión de la transacción (de withTransaction).
  * @param {number} productId
  * @param {Express.Multer.File[]} files Archivos ya guardados por multer.
  */
 async function insertImages(db, productId, files) {
   if (!files.length) return;
-  const { rows: [{ max }] } = await db.query('SELECT COALESCE(max(sort_order), -1) AS max FROM product_images WHERE product_id = $1', [productId]);
+  const { rows: [{ max }] } = await db.query('SELECT COALESCE(MAX(sort_order), -1) AS max FROM product_images WHERE product_id = ?', [productId]);
   await db.query(
-    `INSERT INTO product_images (product_id, url, sort_order)
-     SELECT $1, url, $2 + ord FROM unnest($3::text[]) WITH ORDINALITY AS t(url, ord)`,
-    [productId, max, files.map((f) => `/uploads/${f.filename}`)],
+    'INSERT INTO product_images (product_id, url, sort_order) VALUES ?',
+    [files.map((f, i) => [productId, `/uploads/${f.filename}`, max + 1 + i])],
   );
 }
 
 /**
  * Sincroniza variantes: actualiza/crea las enviadas y elimina las que ya no están.
  * Una variante se identifica por (talla, color); el stock se sobrescribe.
- * @param {import('pg').PoolClient} db Cliente de la transacción.
+ * @param {{ query: Function }} db Conexión de la transacción (de withTransaction).
  * @param {number} productId
  * @param {Array<{ size: string, color: string, stock: number }>} variants Lista completa deseada.
  */
 async function syncVariants(db, productId, variants) {
+  if (!variants.length) {
+    await db.query('DELETE FROM product_variants WHERE product_id = ?', [productId]);
+    return;
+  }
+  // Un arreglo de pares se expande como (('S', 'Negro'), ('M', 'Blanco')).
   await db.query(
-    `DELETE FROM product_variants
-      WHERE product_id = $1
-        AND (size, color) NOT IN (SELECT * FROM unnest($2::text[], $3::text[]))`,
-    [productId, variants.map((v) => v.size), variants.map((v) => v.color)],
+    'DELETE FROM product_variants WHERE product_id = ? AND (size, color) NOT IN (?)',
+    [productId, variants.map((v) => [v.size, v.color])],
   );
-  if (!variants.length) return;
   await db.query(
-    `INSERT INTO product_variants (product_id, size, color, stock)
-     SELECT $1, * FROM unnest($2::text[], $3::text[], $4::int[])
-     ON CONFLICT (product_id, size, color) DO UPDATE SET stock = EXCLUDED.stock`,
-    [productId, variants.map((v) => v.size), variants.map((v) => v.color), variants.map((v) => v.stock)],
+    `INSERT INTO product_variants (product_id, size, color, stock) VALUES ?
+     ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
+    [variants.map((v) => [productId, v.size, v.color, v.stock])],
   );
 }
 
@@ -119,17 +119,13 @@ async function syncVariants(db, productId, variants) {
  * @throws {HttpError} 404 si no existe.
  */
 async function getProduct(id) {
-  const { rows: [product] } = await query(
-    `SELECT p.*,
-            COALESCE((SELECT json_agg(json_build_object('id', i.id, 'url', i.url) ORDER BY i.sort_order, i.id)
-                        FROM product_images i WHERE i.product_id = p.id), '[]') AS images,
-            COALESCE((SELECT json_agg(json_build_object('id', v.id, 'size', v.size, 'color', v.color, 'stock', v.stock) ORDER BY v.color, v.id)
-                        FROM product_variants v WHERE v.product_id = p.id), '[]') AS variants
-       FROM products p WHERE p.id = $1`,
-    [id],
-  );
+  const [{ rows: [product] }, { rows: images }, { rows: variants }] = await Promise.all([
+    query('SELECT * FROM products WHERE id = ?', [id]),
+    query('SELECT id, url FROM product_images WHERE product_id = ? ORDER BY sort_order, id', [id]),
+    query('SELECT id, size, color, stock FROM product_variants WHERE product_id = ? ORDER BY color, id', [id]),
+  ]);
   if (!product) throw new HttpError(404, 'Producto no encontrado');
-  return product;
+  return { ...product, images, variants };
 }
 
 // ── Listado ───────────────────────────────────────────────────
@@ -147,18 +143,19 @@ router.get(
   }),
   async (req, res) => {
     const { q, categoryId, page, limit } = req.valid.query;
+    const search = q ? escapeLike(q) : null;
     const { rows } = await query(
       `SELECT p.id, p.name, p.slug, p.price, p.final_price, p.discount_active, p.discount_percent,
               p.is_active, p.is_featured, c.name AS category_name,
               (SELECT url FROM product_images i WHERE i.product_id = p.id ORDER BY sort_order, id LIMIT 1) AS thumbnail,
-              (SELECT COALESCE(sum(stock), 0)::int FROM product_variants v WHERE v.product_id = p.id) AS total_stock,
-              count(*) OVER()::int AS total_count
+              (SELECT COALESCE(SUM(stock), 0) FROM product_variants v WHERE v.product_id = p.id) AS total_stock,
+              COUNT(*) OVER() AS total_count
          FROM products p JOIN categories c ON c.id = p.category_id
-        WHERE ($1::text IS NULL OR p.name ILIKE '%' || $1 || '%')
-          AND ($2::int IS NULL OR p.category_id = $2)
+        WHERE (? IS NULL OR p.name LIKE CONCAT('%', ?, '%'))
+          AND (? IS NULL OR p.category_id = ?)
         ORDER BY p.created_at DESC, p.id DESC
-        LIMIT $3 OFFSET $4`,
-      [q ? escapeLike(q) : null, categoryId ?? null, limit, (page - 1) * limit],
+        LIMIT ? OFFSET ?`,
+      [search, search, categoryId ?? null, categoryId ?? null, limit, (page - 1) * limit],
     );
     const total = rows[0]?.total_count ?? 0;
     res.json({ items: rows.map(({ total_count: _t, ...r }) => r), total, page, pages: Math.max(1, Math.ceil(total / limit)) });
@@ -182,14 +179,14 @@ router.post(
     const slug = `${slugify(data.name) || 'producto'}-${crypto.randomBytes(3).toString('hex')}`;
 
     const id = await withTransaction(async (db) => {
-      const { rows: [row] } = await db.query(
+      const { insertId } = await db.query(
         `INSERT INTO products (category_id, name, slug, description, price, discount_active, discount_percent, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [data.categoryId, data.name, slug, data.description, data.price, data.discountActive, data.discountPercent, data.isActive],
       );
-      await syncVariants(db, row.id, data.variants);
-      await insertImages(db, row.id, req.files ?? []);
-      return row.id;
+      await syncVariants(db, insertId, data.variants);
+      await insertImages(db, insertId, req.files ?? []);
+      return insertId;
     });
 
     res.status(201).json(await getProduct(id));
@@ -211,18 +208,23 @@ router.put(
     const removedUrls = await withTransaction(async (db) => {
       const { rowCount } = await db.query(
         `UPDATE products
-            SET category_id = $2, name = $3, description = $4, price = $5,
-                discount_active = $6, discount_percent = $7, is_active = $8
-          WHERE id = $1`,
-        [id, data.categoryId, data.name, data.description, data.price, data.discountActive, data.discountPercent, data.isActive],
+            SET category_id = ?, name = ?, description = ?, price = ?,
+                discount_active = ?, discount_percent = ?, is_active = ?
+          WHERE id = ?`,
+        [data.categoryId, data.name, data.description, data.price, data.discountActive, data.discountPercent, data.isActive, id],
       );
       if (!rowCount) throw new HttpError(404, 'Producto no encontrado');
 
       await syncVariants(db, id, data.variants);
-      const { rows: removed } = await db.query(
-        'DELETE FROM product_images WHERE product_id = $1 AND id = ANY($2::int[]) RETURNING url',
-        [id, data.removeImageIds],
-      );
+      // Sin RETURNING en MySQL: se leen las URLs y luego se borran (dentro de la misma transacción).
+      let removed = [];
+      if (data.removeImageIds.length) {
+        ({ rows: removed } = await db.query(
+          'SELECT url FROM product_images WHERE product_id = ? AND id IN (?) FOR UPDATE',
+          [id, data.removeImageIds],
+        ));
+        await db.query('DELETE FROM product_images WHERE product_id = ? AND id IN (?)', [id, data.removeImageIds]);
+      }
       await insertImages(db, id, req.files ?? []);
       return removed.map((r) => r.url);
     });
@@ -244,14 +246,16 @@ router.patch(
   }),
   async (req, res) => {
     const { discountActive, discountPercent } = req.valid.body;
-    const { rows: [row] } = await query(
-      `UPDATE products
-          SET discount_active = $2, discount_percent = COALESCE($3, discount_percent)
-        WHERE id = $1
-        RETURNING id, price, final_price, discount_active, discount_percent`,
-      [req.valid.params.id, discountActive, discountPercent ?? null],
+    const { id } = req.valid.params;
+    const { rowCount } = await query(
+      'UPDATE products SET discount_active = ?, discount_percent = COALESCE(?, discount_percent) WHERE id = ?',
+      [discountActive, discountPercent ?? null, id],
     );
-    if (!row) throw new HttpError(404, 'Producto no encontrado');
+    if (!rowCount) throw new HttpError(404, 'Producto no encontrado');
+    const { rows: [row] } = await query(
+      'SELECT id, price, final_price, discount_active, discount_percent FROM products WHERE id = ?',
+      [id],
+    );
     res.json(row);
   },
 );
@@ -261,8 +265,8 @@ router.patch(
 /** DELETE /:id — Elimina el producto y, después del COMMIT, sus imágenes del disco. */
 router.delete('/:id', validate({ params: idParams }), async (req, res) => {
   const urls = await withTransaction(async (db) => {
-    const { rows: images } = await db.query('SELECT url FROM product_images WHERE product_id = $1', [req.valid.params.id]);
-    const { rowCount } = await db.query('DELETE FROM products WHERE id = $1', [req.valid.params.id]);
+    const { rows: images } = await db.query('SELECT url FROM product_images WHERE product_id = ?', [req.valid.params.id]);
+    const { rowCount } = await db.query('DELETE FROM products WHERE id = ?', [req.valid.params.id]);
     if (!rowCount) throw new HttpError(404, 'Producto no encontrado');
     return images.map((i) => i.url);
   });

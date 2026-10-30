@@ -1,7 +1,7 @@
 {
   "name": "skaditienda",
   "private": true,
-  "description": "E-commerce monolítico Skaditienda (React + Express + PostgreSQL + Wompi)",
+  "description": "E-commerce monolítico Skaditienda (React + Express + MySQL + Wompi)",
   "workspaces": [
     "server",
     "client"

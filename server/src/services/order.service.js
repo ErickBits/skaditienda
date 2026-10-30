@@ -34,7 +34,7 @@ export async function createOrder({ customer, items }) {
               p.id AS product_id, p.name, p.final_price
          FROM product_variants v
          JOIN products p ON p.id = v.product_id
-        WHERE v.id = ANY($1::int[]) AND p.is_active`,
+        WHERE v.id IN (?) AND p.is_active`,
       [variantIds],
     );
 
@@ -52,20 +52,19 @@ export async function createOrder({ customer, items }) {
       return { ...row, quantity };
     });
 
-    const { rows: [order] } = await db.query(
-      `INSERT INTO orders (reference, customer_name, customer_email, phone_primary, phone_secondary, address, city, amount_in_cents)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, reference, amount_in_cents, currency`,
-      [generateReference(), customer.name, customer.email, customer.phonePrimary, customer.phoneSecondary,
-        customer.address, customer.city, total * 100],
+    // MySQL no tiene RETURNING: el UUID se genera aquí y la orden se arma con los mismos valores.
+    const order = { id: crypto.randomUUID(), reference: generateReference(), amount_in_cents: total * 100, currency: 'COP' };
+    await db.query(
+      `INSERT INTO orders (id, reference, customer_name, customer_email, phone_primary, phone_secondary, address, city, amount_in_cents, currency)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [order.id, order.reference, customer.name, customer.email, customer.phonePrimary, customer.phoneSecondary,
+        customer.address, customer.city, order.amount_in_cents, order.currency],
     );
 
+    // `VALUES ?` con un arreglo de filas → inserción múltiple en una sola sentencia.
     await db.query(
-      `INSERT INTO order_items (order_id, product_id, variant_id, product_name, size, color, unit_price, quantity)
-       SELECT $1::uuid, * FROM unnest($2::int[], $3::int[], $4::text[], $5::text[], $6::text[], $7::int[], $8::smallint[])`,
-      [order.id,
-        lines.map((l) => l.product_id), lines.map((l) => l.variant_id), lines.map((l) => l.name),
-        lines.map((l) => l.size), lines.map((l) => l.color), lines.map((l) => l.final_price), lines.map((l) => l.quantity)],
+      'INSERT INTO order_items (order_id, product_id, variant_id, product_name, size, color, unit_price, quantity) VALUES ?',
+      [lines.map((l) => [order.id, l.product_id, l.variant_id, l.name, l.size, l.color, l.final_price, l.quantity])],
     );
 
     return order;
@@ -73,15 +72,15 @@ export async function createOrder({ customer, items }) {
 }
 
 /**
- * SQL que suma o resta al stock las cantidades de una orden ($1 = id de la orden).
+ * SQL que suma o resta al stock las cantidades de una orden (? = id de la orden).
  * GREATEST(…, 0) evita stock negativo si se vendió más de lo disponible mientras el pago estaba pendiente.
  * @param {'+' | '-'} operator
  */
 const STOCK_DELTA_SQL = (operator) => `
   UPDATE product_variants v
-     SET stock = GREATEST(v.stock ${operator} oi.quantity, 0)
-    FROM order_items oi
-   WHERE oi.order_id = $1 AND oi.variant_id = v.id`;
+    JOIN order_items oi ON oi.variant_id = v.id
+     SET v.stock = GREATEST(v.stock ${operator} oi.quantity, 0)
+   WHERE oi.order_id = ?`;
 
 /**
  * Aplica a la orden el estado de una transacción de Wompi. Es IDEMPOTENTE:
@@ -98,7 +97,7 @@ export async function applyTransaction(tx) {
   return withTransaction(async (db) => {
     // FOR UPDATE: bloquea la fila para que dos notificaciones simultáneas no se pisen.
     const { rows: [order] } = await db.query(
-      'SELECT id, status, amount_in_cents, currency, wompi_transaction_id FROM orders WHERE reference = $1 FOR UPDATE',
+      'SELECT id, status, amount_in_cents, currency, wompi_transaction_id FROM orders WHERE reference = ? FOR UPDATE',
       [tx.reference],
     );
     if (!order) return { applied: false, reason: 'orden no encontrada' };
@@ -107,8 +106,8 @@ export async function applyTransaction(tx) {
     if (tx.amount_in_cents !== order.amount_in_cents || tx.currency !== order.currency) {
       console.error(`[wompi] ⚠️ monto/moneda no coinciden en ${tx.reference}: tx=${tx.amount_in_cents} ${tx.currency}, orden=${order.amount_in_cents} ${order.currency}`);
       await db.query(
-        `UPDATE orders SET status = 'ERROR', status_detail = 'Monto de la transacción no coincide', wompi_transaction_id = $2 WHERE id = $1`,
-        [order.id, tx.id],
+        `UPDATE orders SET status = 'ERROR', status_detail = 'Monto de la transacción no coincide', wompi_transaction_id = ? WHERE id = ?`,
+        [tx.id, order.id],
       );
       return { applied: false, reason: 'monto no coincide' };
     }
@@ -120,10 +119,10 @@ export async function applyTransaction(tx) {
 
     await db.query(
       `UPDATE orders
-          SET status = $2::order_status, status_detail = $3, wompi_transaction_id = $4, payment_method_type = $5,
-              paid_at = CASE WHEN $2::order_status = 'APPROVED' THEN COALESCE(paid_at, now()) ELSE paid_at END
-        WHERE id = $1`,
-      [order.id, tx.status, tx.status_message ?? null, tx.id, tx.payment_method_type ?? null],
+          SET status = ?, status_detail = ?, wompi_transaction_id = ?, payment_method_type = ?,
+              paid_at = CASE WHEN ? = 'APPROVED' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
+        WHERE id = ?`,
+      [tx.status, tx.status_message ?? null, tx.id, tx.payment_method_type ?? null, tx.status, order.id],
     );
 
     // Inventario: se descuenta al aprobar y se devuelve si una venta aprobada se anula.

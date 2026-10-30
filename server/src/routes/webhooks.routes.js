@@ -39,8 +39,8 @@ router.post('/wompi', async (req, res) => {
   // 4) Bitácora para auditoría; los reintentos con el mismo checksum no se duplican.
   await query(
     `INSERT INTO webhook_events (checksum, event_type, transaction_id, status, payload)
-     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (checksum) DO NOTHING`,
-    [event.signature.checksum.toLowerCase(), event.event, tx.id, tx.status, event],
+     VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id`,
+    [event.signature.checksum.toLowerCase(), event.event, tx.id, tx.status, JSON.stringify(event)],
   );
 
   console.info(`[wompi] ${tx.reference} → ${tx.status}`, result);

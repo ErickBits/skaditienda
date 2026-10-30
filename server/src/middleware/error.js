@@ -10,7 +10,7 @@ export function apiNotFound(_req, res) {
 
 /**
  * Manejador central: toda respuesta de error sale de aquí con el formato `{ error, details? }`.
- * Traduce errores conocidos (multer, body-parser, PostgreSQL) a HttpError con un mensaje
+ * Traduce errores conocidos (multer, body-parser, MySQL) a HttpError con un mensaje
  * entendible. En producción oculta el mensaje real de los 5xx y lo deja solo en el log.
  */
 // eslint-disable-next-line no-unused-vars
@@ -24,9 +24,9 @@ export function errorHandler(err, _req, res, _next) {
     error = new HttpError(400, 'JSON inválido');
   } else if (err.type === 'entity.too.large') {
     error = new HttpError(413, 'La solicitud es demasiado grande');
-  } else if (err.code === '23505') { // PostgreSQL: violación de UNIQUE
+  } else if (err.code === 'ER_DUP_ENTRY') { // MySQL: violación de UNIQUE
     error = new HttpError(409, 'Ya existe un registro con esos datos');
-  } else if (err.code === '23503') { // PostgreSQL: violación de llave foránea
+  } else if (['ER_ROW_IS_REFERENCED_2', 'ER_NO_REFERENCED_ROW_2'].includes(err.code)) { // MySQL: llave foránea
     error = new HttpError(409, 'El registro está relacionado con otros datos');
   }
 

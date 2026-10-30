@@ -53,7 +53,7 @@ export async function requireAdmin(req, _res, next) {
   }
 
   // Si el admin fue eliminado, su token deja de servir de inmediato.
-  const { rows } = await query('SELECT id, email FROM admins WHERE id = $1', [Number(payload.sub)]);
+  const { rows } = await query('SELECT id, email FROM admins WHERE id = ?', [Number(payload.sub)]);
   if (!rows[0]) return next(new HttpError(401, 'Sesión inválida'));
 
   req.admin = rows[0];

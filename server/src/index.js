@@ -11,7 +11,7 @@ try {
   // Falla rápido si la base de datos no responde, en vez de arrancar "a medias".
   await pool.query('SELECT 1');
 } catch (err) {
-  console.error('❌ No se pudo conectar a PostgreSQL:', err.message);
+  console.error('❌ No se pudo conectar a MySQL:', err.message);
   process.exit(1);
 }
 

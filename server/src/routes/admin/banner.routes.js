@@ -16,7 +16,7 @@ router.get('/', async (_req, res) => {
             (SELECT url FROM product_images i WHERE i.product_id = p.id ORDER BY sort_order, id LIMIT 1) AS thumbnail
        FROM products p
       WHERE p.is_featured
-      ORDER BY p.featured_order NULLS LAST, p.id`,
+      ORDER BY p.featured_order IS NULL, p.featured_order, p.id`,
   );
   res.json(rows);
 });
@@ -42,12 +42,10 @@ router.put(
       await db.query('UPDATE products SET is_featured = false, featured_order = NULL WHERE is_featured');
       if (!productIds.length) return;
 
+      // FIELD(id, 7, 3, 9) devuelve la posición (1, 2, 3…) del id en la lista: ese es el orden del banner.
       const { rowCount } = await db.query(
-        `UPDATE products p
-            SET is_featured = true, featured_order = t.ord
-           FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)
-          WHERE p.id = t.id`,
-        [productIds],
+        'UPDATE products SET is_featured = TRUE, featured_order = FIELD(id, ?) WHERE id IN (?)',
+        [productIds, productIds],
       );
       if (rowCount !== productIds.length) throw new HttpError(400, 'Algún producto no existe');
     });

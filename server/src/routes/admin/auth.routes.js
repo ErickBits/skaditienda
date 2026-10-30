@@ -35,12 +35,12 @@ const loginSchema = z.object({
  */
 router.post('/login', loginLimiter, validate({ body: loginSchema }), async (req, res) => {
   const { email, password } = req.valid.body;
-  const { rows: [admin] } = await query('SELECT id, email, password_hash FROM admins WHERE email = $1', [email]);
+  const { rows: [admin] } = await query('SELECT id, email, password_hash FROM admins WHERE email = ?', [email]);
 
   const valid = await bcrypt.compare(password, admin?.password_hash ?? DECOY_HASH);
   if (!admin || !valid) throw new HttpError(401, 'Credenciales inválidas');
 
-  await query('UPDATE admins SET last_login_at = now() WHERE id = $1', [admin.id]);
+  await query('UPDATE admins SET last_login_at = NOW() WHERE id = ?', [admin.id]);
   res.cookie(ADMIN_COOKIE, signAdminToken(admin), adminCookieOptions);
   res.json({ email: admin.email });
 });
